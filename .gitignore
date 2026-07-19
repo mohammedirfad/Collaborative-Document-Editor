@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# next.js build output
+/.next
+/out
+
+# Test coverage
+coverage/
+
+/docs
