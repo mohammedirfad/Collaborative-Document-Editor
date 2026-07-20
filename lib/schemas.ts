@@ -39,6 +39,7 @@ const snapshotSchema = Joi.object({
 export const syncSchema = Joi.object({
   documentId: Joi.string().max(80).required(),
   baseClock: vectorClockSchema.required(),
+  clientSnapshot: snapshotSchema.optional(),
   operations: Joi.array()
     .max(maxOperations)
     .items(

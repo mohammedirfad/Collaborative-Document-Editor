@@ -2,7 +2,7 @@
 
 import { applyOperations, compactOperations } from "@/lib/crdt";
 import { saveLocalState } from "@/lib/localStore";
-import type { ConnectionState, DocumentSnapshot, SyncOperation, Version } from "@/types/document";
+import type { ConnectionState, DocumentSnapshot, Role, SyncOperation, Version } from "@/types/document";
 
 type EngineState = {
   document: DocumentSnapshot;
@@ -11,6 +11,7 @@ type EngineState = {
   versions: Version[];
   token?: string;
   userId: string;
+  role?: Role;
 };
 
 type EngineListeners = {
@@ -28,6 +29,19 @@ export class SyncEngine {
 
   get snapshot() {
     return this.state;
+  }
+
+  async replaceDocument(document: DocumentSnapshot, operations: SyncOperation[] = [], versions: Version[] = [], role?: Role) {
+    this.state = {
+      ...this.state,
+      document,
+      operations: compactOperations(operations),
+      pending: [],
+      versions,
+      role: role ?? this.state.role
+    };
+    await this.persistAndNotify();
+    void this.flush();
   }
 
   async queue(operation: SyncOperation) {
@@ -85,6 +99,7 @@ export class SyncEngine {
         body: JSON.stringify({
           documentId: this.state.document.id,
           baseClock: this.state.document.clock,
+          clientSnapshot: this.state.document,
           operations: this.state.pending
         })
       });
@@ -98,13 +113,15 @@ export class SyncEngine {
         document: DocumentSnapshot;
         operations: SyncOperation[];
         versions: Version[];
+        role?: Role;
       };
       this.state = {
         ...this.state,
         document: payload.document,
         operations: compactOperations(payload.operations),
         pending: this.state.pending.length > 0 ? [] : this.state.pending,
-        versions: payload.versions
+        versions: payload.versions,
+        role: payload.role ?? this.state.role
       };
       await this.persistAndNotify();
       this.listeners.onConnection("online");

@@ -17,8 +17,9 @@ export async function POST(request: Request) {
 
     const body = validateBody<SyncRequest>(syncSchema, await request.json());
     let loaded = await loadDocument(body.documentId, user.id);
-    if (!loaded && body.operations.length > 0) {
-      const initial = applyOperations(createBlankDocument(body.documentId), body.operations);
+    if (!loaded && (body.operations.length > 0 || body.clientSnapshot)) {
+      const initialBase = body.clientSnapshot ?? createBlankDocument(body.documentId);
+      const initial = applyOperations(initialBase, body.operations);
       await ensureDocumentOwnedByUser(initial, user.id);
       loaded = await loadDocument(body.documentId, user.id);
     }
@@ -34,7 +35,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       document,
       operations: fresh?.operations ?? [],
-      versions: fresh?.versions ?? []
+      versions: fresh?.versions ?? [],
+      role: fresh?.role
     });
   } catch (error) {
     if (error instanceof ValidationError) {

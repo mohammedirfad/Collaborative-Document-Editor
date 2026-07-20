@@ -52,6 +52,7 @@ export type SyncRequest = {
   documentId: string;
   baseClock: VectorClock;
   operations: SyncOperation[];
+  clientSnapshot?: DocumentSnapshot;
 };
 
 export type SyncResponse = {

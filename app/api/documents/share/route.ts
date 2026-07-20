@@ -17,7 +17,9 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return NextResponse.json({ error: result.message }, { status: result.status });
     }
-    return NextResponse.json({ member: result.member });
+    const url = new URL(request.url);
+    const shareUrl = `${url.origin}/?documentId=${encodeURIComponent(body.documentId)}`;
+    return NextResponse.json({ member: result.member, shareUrl });
   } catch (error) {
     if (error instanceof ValidationError) {
       return NextResponse.json({ error: "Invalid share request", details: error.details }, { status: 422 });

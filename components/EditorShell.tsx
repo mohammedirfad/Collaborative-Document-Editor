@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Bot, Cloud, CloudOff, FileText, History, LockKeyhole, Menu, Plus, RotateCcw, Save, Share2, ShieldCheck, Trash2, Wifi, X } from "lucide-react";
+import { Bot, Cloud, CloudOff, FileText, FolderOpen, History, LockKeyhole, Menu, Plus, RotateCcw, Save, Share2, ShieldCheck, Trash2, Wifi, X } from "lucide-react";
 import { AuthModal } from "@/components/AuthModal";
 import { ShareModal } from "@/components/ShareModal";
 import { applyOperations, getLamport, incrementClock } from "@/lib/crdt";
@@ -10,6 +10,13 @@ import { createId } from "@/lib/id";
 import { loadLocalState } from "@/lib/localStore";
 import { SyncEngine } from "@/lib/syncEngine";
 import type { Block, ConnectionState, DocumentSnapshot, SyncOperation, Version } from "@/types/document";
+
+type DocumentListItem = {
+  id: string;
+  title: string;
+  updatedAt: string;
+  role: "OWNER" | "EDITOR" | "VIEWER";
+};
 
 export function EditorShell() {
   const [document, setDocument] = useState<DocumentSnapshot | null>(null);
@@ -25,6 +32,9 @@ export function EditorShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [token, setToken] = useState<string | undefined>();
+  const [currentRole, setCurrentRole] = useState<"OWNER" | "EDITOR" | "VIEWER">("OWNER");
+  const [documents, setDocuments] = useState<DocumentListItem[]>([]);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
   const engine = useRef<SyncEngine | null>(null);
   const userId = useRef("local-user");
   const clientId = useMemo(() => (typeof window === "undefined" ? "server" : localStorage.getItem("client-id") ?? createClientId()), []);
@@ -39,6 +49,7 @@ export function EditorShell() {
       setPending(state.pending.length);
       setIsSignedIn(Boolean(state.token));
       setToken(state.token);
+      setCurrentRole(state.role ?? "OWNER");
       engine.current = new SyncEngine(state, {
         onState: (next) => {
           setDocument(next.document);
@@ -53,6 +64,10 @@ export function EditorShell() {
       setConnection(navigator.onLine ? "online" : "offline");
       setMessage(describeConnection(navigator.onLine ? "online" : "offline"));
       void engine.current.flush();
+      if (state.token) {
+        void loadDocuments(state.token);
+        void openDocumentFromUrl(state.token);
+      }
     });
 
     const online = () => void engine.current?.flush();
@@ -101,38 +116,127 @@ export function EditorShell() {
     return false;
   }
 
+  function requireWriteAccess(reason: string) {
+    if (!requireAuth(reason)) return false;
+    if (currentRole === "VIEWER") {
+      setToast("You have Viewer access. Ask the owner for Editor access to make changes.");
+      return false;
+    }
+    return true;
+  }
+
+  async function loadDocuments(activeToken = token) {
+    if (!activeToken) return;
+    const response = await fetch("/api/documents", {
+      headers: { authorization: `Bearer ${activeToken}` }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setToast(payload.error ?? "Unable to load documents.");
+      return;
+    }
+    setDocuments(payload.documents ?? []);
+  }
+
+  async function openDocument(documentId: string, activeToken = token) {
+    if (!activeToken || !engine.current) return;
+    await engine.current?.flush();
+    const response = await fetch("/api/documents/sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${activeToken}`
+      },
+      body: JSON.stringify({
+        documentId,
+        baseClock: {},
+        operations: []
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setToast(payload.error ?? "Unable to open document.");
+      return;
+    }
+    await engine.current.replaceDocument(payload.document, payload.operations ?? [], payload.versions ?? [], payload.role);
+    setCurrentRole(payload.role ?? "OWNER");
+    setDocumentsOpen(false);
+  }
+
+  async function openDocumentFromUrl(activeToken = token) {
+    if (!activeToken) return;
+    const documentId = new URLSearchParams(window.location.search).get("documentId");
+    if (documentId) {
+      await openDocument(documentId, activeToken);
+    }
+  }
+
+  async function createNewDocument() {
+    if (!requireAuth("Sign in to create a new document.")) return;
+    if (!token) return;
+    await engine.current?.flush();
+    const response = await fetch("/api/documents", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setToast(payload.error ?? "Unable to create document.");
+      return;
+    }
+    const blank = {
+      id: payload.document.id,
+      title: payload.document.title,
+      updatedAt: Date.now(),
+      clock: {},
+      blocks: [
+        {
+          id: "intro",
+          text: "Start writing here. Changes are saved locally first and synced in the background.",
+          updatedAt: Date.now(),
+          updatedBy: "system",
+          version: {}
+        }
+      ]
+    };
+    await engine.current?.replaceDocument(blank, [], [], "OWNER");
+    setCurrentRole("OWNER");
+    await loadDocuments(token);
+    setDocumentsOpen(false);
+  }
+
   function updateBlock(block: Block, text: string) {
-    if (!requireAuth("Sign in to edit. This protects the shared document from anonymous changes.")) return;
+    if (!requireWriteAccess("Sign in to edit. This protects the shared document from anonymous changes.")) return;
     const next = operation("UPSERT_BLOCK", { blockId: block.id, text });
     if (next) void engine.current?.queue(next);
   }
 
   function addBlock() {
-    if (!requireAuth("Sign in to add a new block to the collaborative document.")) return;
+    if (!requireWriteAccess("Sign in to add a new block to the collaborative document.")) return;
     const next = operation("UPSERT_BLOCK", { blockId: createId("block"), text: "" });
     if (next) void engine.current?.queue(next);
   }
 
   function deleteBlock(blockId: string) {
-    if (!requireAuth("Sign in to delete blocks. Destructive edits must be tied to a user.")) return;
+    if (!requireWriteAccess("Sign in to delete blocks. Destructive edits must be tied to a user.")) return;
     const next = operation("DELETE_BLOCK", { blockId });
     if (next) void engine.current?.queue(next);
   }
 
   function rename(title: string) {
-    if (!requireAuth("Sign in to rename the document.")) return;
+    if (!requireWriteAccess("Sign in to rename the document.")) return;
     const next = operation("SET_TITLE", { title });
     if (next) void engine.current?.queue(next);
   }
 
   function restore(version: Version) {
-    if (!requireAuth("Sign in to restore a checkpoint. Restore is saved as a new auditable operation.")) return;
+    if (!requireWriteAccess("Sign in to restore a checkpoint. Restore is saved as a new auditable operation.")) return;
     const next = operation("RESTORE_SNAPSHOT", { snapshot: version.snapshot });
     if (next) void engine.current?.queue(next);
   }
 
   async function captureVersion() {
-    if (!requireAuth("Sign in to capture version checkpoints.")) return;
+    if (!requireWriteAccess("Sign in to capture version checkpoints.")) return;
     const label = `Checkpoint ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     await engine.current?.saveVersion(label);
   }
@@ -165,6 +269,8 @@ export function EditorShell() {
           setIsSignedIn(true);
           setToken(token);
           void engine.current?.replaceAuth(token);
+          void loadDocuments(token);
+          void openDocumentFromUrl(token);
         }}
         onToast={setToast}
       />
@@ -193,6 +299,13 @@ export function EditorShell() {
             <a className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100" href="#editor">
               Editor
             </a>
+            <button className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100" onClick={() => {
+              if (!requireAuth("Sign in to view your document library.")) return;
+              void loadDocuments();
+              setDocumentsOpen((open) => !open);
+            }}>
+              Documents
+            </button>
             <a className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100" href="#versions">
               Versions
             </a>
@@ -226,6 +339,13 @@ export function EditorShell() {
               <a className="rounded-md px-3 py-2 text-sm font-medium hover:bg-slate-100" href="#editor" onClick={() => setMobileNavOpen(false)}>
                 Editor
               </a>
+              <button className="rounded-md px-3 py-2 text-left text-sm font-medium hover:bg-slate-100" onClick={() => {
+                if (!requireAuth("Sign in to view your document library.")) return;
+                void loadDocuments();
+                setDocumentsOpen((open) => !open);
+              }}>
+                Documents
+              </button>
               <a className="rounded-md px-3 py-2 text-sm font-medium hover:bg-slate-100" href="#versions" onClick={() => setMobileNavOpen(false)}>
                 Versions
               </a>
@@ -246,6 +366,32 @@ export function EditorShell() {
         )}
       </header>
 
+      {documentsOpen && (
+        <section className="border-b border-slate-200 bg-white">
+          <div className="mx-auto max-w-7xl px-4 py-4">
+            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <FolderOpen size={18} aria-hidden />
+                <h2 className="text-base font-semibold">Documents</h2>
+              </div>
+              <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white" onClick={createNewDocument}>
+                <Plus size={16} aria-hidden />
+                New document
+              </button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+              {documents.length === 0 && <p className="text-sm text-slate-500">No server documents yet. Edit or create one to save it.</p>}
+              {documents.map((item) => (
+                <button key={item.id} className={`rounded-md border p-3 text-left hover:border-cedar ${item.id === syncedDocument.id ? "border-cedar bg-emerald-50" : "border-slate-200 bg-slate-50"}`} onClick={() => void openDocument(item.id)}>
+                  <span className="block truncate text-sm font-semibold">{item.title}</span>
+                  <span className="mt-1 block text-xs text-slate-500">{item.role} | {new Date(item.updatedAt).toLocaleString()}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0 flex-1">
@@ -254,11 +400,16 @@ export function EditorShell() {
               aria-label="Document title"
               className="mt-1 w-full bg-transparent text-2xl font-bold outline-none sm:text-3xl"
               value={syncedDocument.title}
-              readOnly={!isSignedIn}
-              onFocus={() => !isSignedIn && requireAuth("Sign in to rename the document.")}
+              readOnly={!isSignedIn || currentRole === "VIEWER"}
+              onFocus={() =>
+                currentRole === "VIEWER"
+                  ? setToast("You have Viewer access. Ask for Editor access to rename this document.")
+                  : !isSignedIn && requireAuth("Sign in to rename the document.")
+              }
               onChange={(event) => rename(event.target.value)}
             />
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Read access is visible immediately for review. Editing, checkpointing, restoring, and syncing require authentication so every operation is accountable.</p>
+            <p className="mt-1 text-xs text-slate-400">Document ID: {syncedDocument.id} | Your role: {currentRole}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <IconButton label="Capture version" onClick={captureVersion} icon={<Save size={17} />} />
@@ -297,8 +448,12 @@ export function EditorShell() {
                   aria-label="Document block"
                   className="min-h-24 resize-y rounded-md bg-slate-50 px-3 py-3 leading-7 outline-none focus:bg-white disabled:cursor-not-allowed disabled:text-slate-500"
                   value={block.text}
-                  readOnly={!isSignedIn}
-                  onFocus={() => !isSignedIn && requireAuth("Sign in to edit this block.")}
+                  readOnly={!isSignedIn || currentRole === "VIEWER"}
+                  onFocus={() =>
+                    currentRole === "VIEWER"
+                      ? setToast("You have Viewer access. Ask for Editor access to edit this block.")
+                      : !isSignedIn && requireAuth("Sign in to edit this block.")
+                  }
                   onChange={(event) => updateBlock(block, event.target.value)}
                 />
                 <button className="h-9 w-9 rounded-md text-slate-400 hover:bg-coral hover:text-white" onClick={() => deleteBlock(block.id)} title="Delete block" aria-label="Delete block">

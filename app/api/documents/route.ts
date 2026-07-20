@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { createBlankDocument } from "@/lib/crdt";
 import { readSession } from "@/lib/security";
+import { createId } from "@/lib/id";
 
 export async function GET(request: Request) {
   const user = await readSession(request.headers.get("authorization"));
@@ -23,16 +24,16 @@ export async function POST(request: Request) {
   const user = await readSession(request.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
-  const document = createBlankDocument();
+  const document = createBlankDocument(createId("doc"));
   document.title = "Untitled collaborative document";
   const client = await getPool().connect();
   try {
     await client.query("begin");
     const { rows } = await client.query(
-      `insert into documents (title, snapshot, owner_id)
-       values ($1, $2, $3)
+      `insert into documents (id, title, snapshot, owner_id)
+       values ($1, $2, $3, $4)
        returning id, title, updated_at as "updatedAt"`,
-      [document.title, document, user.id]
+      [document.id, document.title, document, user.id]
     );
     await client.query(
       `insert into document_members (document_id, user_id, role)

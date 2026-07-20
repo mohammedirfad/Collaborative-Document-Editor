@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, Pencil, Send, Share2, X } from "lucide-react";
+import { Check, Copy, Eye, Pencil, Send, Share2, X } from "lucide-react";
 
 type ShareRole = "EDITOR" | "VIEWER";
 
@@ -18,6 +18,8 @@ export function ShareModal({ open, documentId, token, onClose, onToast }: Props)
   const [role, setRole] = useState<ShareRole>("EDITOR");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
+  const [copied, setCopied] = useState(false);
 
   if (!open) return null;
 
@@ -48,14 +50,25 @@ export function ShareModal({ open, documentId, token, onClose, onToast }: Props)
         onToast(payload.details?.join(", ") ?? payload.error ?? "Unable to share document.");
         return;
       }
+      if (payload.shareUrl && navigator.clipboard) {
+        await navigator.clipboard.writeText(payload.shareUrl).catch(() => undefined);
+      }
+      setShareUrl(payload.shareUrl ?? "");
+      setCopied(Boolean(payload.shareUrl));
       onToast(`${trimmedEmail} was added as ${role.toLowerCase()}.`);
       setEmail("");
-      onClose();
     } catch {
       onToast("Unable to reach the share API.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function copyShareUrl() {
+    if (!shareUrl) return;
+    await navigator.clipboard?.writeText(shareUrl).catch(() => undefined);
+    setCopied(true);
+    onToast("Share link copied.");
   }
 
   return (
@@ -110,6 +123,20 @@ export function ShareModal({ open, documentId, token, onClose, onToast }: Props)
             <Send size={17} aria-hidden />
             {loading ? "Sharing..." : "Share access"}
           </button>
+
+          {shareUrl && (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-sm font-semibold text-ink">Share this link with the invited user</p>
+              <div className="mt-2 flex gap-2">
+                <input className="min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-700" value={shareUrl} readOnly aria-label="Share link" />
+                <button className="inline-flex h-10 items-center gap-2 rounded-md bg-cedar px-3 text-sm font-semibold text-white" onClick={copyShareUrl}>
+                  {copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-slate-600">Send this to the invited user. They must sign in with the same email you shared access with.</p>
+            </div>
+          )}
         </div>
       </section>
     </div>

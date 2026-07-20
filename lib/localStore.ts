@@ -2,7 +2,7 @@
 
 import { createBlankDocument } from "@/lib/crdt";
 import { createId } from "@/lib/id";
-import type { DocumentSnapshot, SyncOperation, Version } from "@/types/document";
+import type { DocumentSnapshot, Role, SyncOperation, Version } from "@/types/document";
 
 type LocalState = {
   document: DocumentSnapshot;
@@ -11,6 +11,7 @@ type LocalState = {
   versions: Version[];
   token?: string;
   userId: string;
+  role?: Role;
 };
 
 const dbName = "house-edtech-editor";
@@ -58,6 +59,7 @@ function createDefaultState(): LocalState {
     pending: [],
     operations: [],
     versions: [],
-    userId
+    userId,
+    role: "OWNER"
   };
 }
