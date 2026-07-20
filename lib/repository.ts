@@ -80,6 +80,25 @@ export async function loadDocument(documentId: string, userId: string) {
   return { document, operations, versions: versionResult.rows as Version[], role };
 }
 
+export async function loadPublicDocument(documentId: string) {
+  const [documentResult, operationResult, versionResult] = await Promise.all([
+    getPool().query(`select id, title, snapshot from documents where id = $1`, [documentId]),
+    getPool().query(`select operation from document_operations where document_id = $1 order by lamport, created_at, id`, [
+      documentId
+    ]),
+    getPool().query(`select id, document_id as "documentId", label, created_at as "createdAt", created_by as "createdBy", snapshot from document_versions where document_id = $1 order by created_at desc`, [
+      documentId
+    ])
+  ]);
+
+  const stored = documentResult.rows[0]?.snapshot as DocumentSnapshot | undefined;
+  if (!stored) return null;
+
+  const operations = operationResult.rows.map((row) => row.operation as SyncOperation);
+  const document = applyOperations(stored, operations);
+  return { document, operations, versions: versionResult.rows as Version[] };
+}
+
 export async function persistOperations(documentId: string, operations: SyncOperation[]) {
   const unique = compactOperations(operations);
   const client = await getPool().connect();

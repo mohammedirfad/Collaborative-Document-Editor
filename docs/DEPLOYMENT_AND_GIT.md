@@ -202,6 +202,8 @@ Now test:
 
 If Browser B already wrote something before opening Mohd's shared document, that work is preserved as Browser B's own document. Opening a shared document switches the active document; it does not merge or overwrite unrelated personal drafts.
 
+Important: permissions are based on the currently signed-in user. If you paste the share link in Mohd's already signed-in browser, it will still show Mohd as `OWNER`. To test Jasir as `VIEWER` or `EDITOR`, open the link in another browser/incognito session and sign in as Jasir.
+
 ## 8. How A Normal User Would Use It
 
 Current app flow:

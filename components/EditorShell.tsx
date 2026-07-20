@@ -35,7 +35,9 @@ export function EditorShell() {
   const [currentRole, setCurrentRole] = useState<"OWNER" | "EDITOR" | "VIEWER">("OWNER");
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [documentsOpen, setDocumentsOpen] = useState(false);
+  const [blockDrafts, setBlockDrafts] = useState<Record<string, string>>({});
   const engine = useRef<SyncEngine | null>(null);
+  const blockTimers = useRef<Record<string, number>>({});
   const userId = useRef("local-user");
   const clientId = useMemo(() => (typeof window === "undefined" ? "server" : localStorage.getItem("client-id") ?? createClientId()), []);
 
@@ -55,6 +57,7 @@ export function EditorShell() {
           setDocument(next.document);
           setVersions(next.versions);
           setPending(next.pending.length);
+          if (next.role) setCurrentRole(next.role);
         },
         onConnection: (next, detail) => {
           setConnection(next);
@@ -67,6 +70,8 @@ export function EditorShell() {
       if (state.token) {
         void loadDocuments(state.token);
         void openDocumentFromUrl(state.token);
+      } else {
+        void openPublicDocumentFromUrl();
       }
     });
 
@@ -85,8 +90,14 @@ export function EditorShell() {
       window.removeEventListener("online", online);
       window.removeEventListener("offline", offline);
       window.clearInterval(refreshTimer);
+      Object.values(blockTimers.current).forEach((timer) => window.clearTimeout(timer));
     };
   }, []);
+
+  useEffect(() => {
+    if (!document) return;
+    setBlockDrafts(Object.fromEntries(document.blocks.map((block) => [block.id, block.text])));
+  }, [document?.id, document?.blocks]);
 
   useEffect(() => {
     if (!toast) return;
@@ -171,6 +182,19 @@ export function EditorShell() {
     }
   }
 
+  async function openPublicDocumentFromUrl() {
+    const documentId = new URLSearchParams(window.location.search).get("documentId");
+    if (!documentId || !engine.current) return;
+    const response = await fetch(`/api/documents/public?documentId=${encodeURIComponent(documentId)}`);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setToast(payload.error ?? "Unable to open shared document preview.");
+      return;
+    }
+    await engine.current.replaceDocument(payload.document, payload.operations ?? [], payload.versions ?? [], "VIEWER");
+    setCurrentRole("VIEWER");
+  }
+
   async function createNewDocument() {
     if (!requireAuth("Sign in to create a new document.")) return;
     if (!token) return;
@@ -209,6 +233,17 @@ export function EditorShell() {
     if (!requireWriteAccess("Sign in to edit. This protects the shared document from anonymous changes.")) return;
     const next = operation("UPSERT_BLOCK", { blockId: block.id, text });
     if (next) void engine.current?.queue(next);
+  }
+
+  function handleBlockInput(block: Block, text: string) {
+    if (!requireWriteAccess("Sign in to edit. This protects the shared document from anonymous changes.")) return;
+    setBlockDrafts((current) => ({ ...current, [block.id]: text }));
+    if (blockTimers.current[block.id]) {
+      window.clearTimeout(blockTimers.current[block.id]);
+    }
+    blockTimers.current[block.id] = window.setTimeout(() => {
+      updateBlock(block, text);
+    }, 250);
   }
 
   function addBlock() {
@@ -402,9 +437,11 @@ export function EditorShell() {
               value={syncedDocument.title}
               readOnly={!isSignedIn || currentRole === "VIEWER"}
               onFocus={() =>
-                currentRole === "VIEWER"
+                !isSignedIn
+                  ? requireAuth("Sign in to rename the document.")
+                  : currentRole === "VIEWER"
                   ? setToast("You have Viewer access. Ask for Editor access to rename this document.")
-                  : !isSignedIn && requireAuth("Sign in to rename the document.")
+                  : undefined
               }
               onChange={(event) => rename(event.target.value)}
             />
@@ -447,14 +484,16 @@ export function EditorShell() {
                 <textarea
                   aria-label="Document block"
                   className="min-h-24 resize-y rounded-md bg-slate-50 px-3 py-3 leading-7 outline-none focus:bg-white disabled:cursor-not-allowed disabled:text-slate-500"
-                  value={block.text}
+                  value={blockDrafts[block.id] ?? block.text}
                   readOnly={!isSignedIn || currentRole === "VIEWER"}
                   onFocus={() =>
-                    currentRole === "VIEWER"
+                    !isSignedIn
+                      ? requireAuth("Sign in to edit this block.")
+                      : currentRole === "VIEWER"
                       ? setToast("You have Viewer access. Ask for Editor access to edit this block.")
-                      : !isSignedIn && requireAuth("Sign in to edit this block.")
+                      : undefined
                   }
-                  onChange={(event) => updateBlock(block, event.target.value)}
+                  onChange={(event) => handleBlockInput(block, event.target.value)}
                 />
                 <button className="h-9 w-9 rounded-md text-slate-400 hover:bg-coral hover:text-white" onClick={() => deleteBlock(block.id)} title="Delete block" aria-label="Delete block">
                   <Trash2 className="mx-auto" size={17} aria-hidden />

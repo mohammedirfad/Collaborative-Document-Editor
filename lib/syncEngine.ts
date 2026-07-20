@@ -139,7 +139,7 @@ export class SyncEngine {
   }
 
   private async persistAndNotify() {
-    await saveLocalState(this.state);
     this.listeners.onState(this.state);
+    await saveLocalState(this.state);
   }
 }
