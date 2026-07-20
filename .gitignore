@@ -17,6 +17,8 @@ npm-debug.log*
 .vscode/
 .idea/
 
+./docs
+
 # OS
 .DS_Store
 Thumbs.db
