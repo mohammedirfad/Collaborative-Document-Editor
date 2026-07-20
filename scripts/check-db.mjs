@@ -20,8 +20,9 @@ if (!process.env.DATABASE_URL) {
 }
 
 const requiredTables = ["users", "documents", "document_members", "document_operations", "document_versions"];
+const connectionString = process.env.DATABASE_URL.replace("sslmode=require", "sslmode=verify-full");
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString,
   connectionTimeoutMillis: 5000
 });
 
@@ -57,7 +58,14 @@ try {
   console.log("Tables OK");
   console.log(counts.join("\n"));
 } catch (error) {
-  console.error(error instanceof Error ? error.message : "Database check failed.");
+  if (error instanceof Error) {
+    console.error(error.message || error.name || "Database check failed.");
+    if ("code" in error && error.code) {
+      console.error(`Code: ${error.code}`);
+    }
+  } else {
+    console.error("Database check failed.");
+  }
   process.exit(1);
 } finally {
   await pool.end();

@@ -57,6 +57,13 @@ Option A - Neon:
 postgresql://user:password@host/dbname?sslmode=require
 ```
 
+Use this URL in two places only:
+
+- Local `.env.local` for testing from your machine.
+- Vercel Project Settings -> Environment Variables for deployed production.
+
+Never paste the real URL into GitHub files, README, docs, screenshots, or frontend code.
+
 Option B - Supabase:
 
 1. Go to `https://supabase.com`.
@@ -91,6 +98,16 @@ You should see:
 - `document_operations`
 - `document_versions`
 
+Neon SQL Editor steps:
+
+1. Open your Neon project.
+2. Go to SQL Editor.
+3. Open `prisma/schema.sql` in this project.
+4. Copy the full SQL.
+5. Paste it into Neon SQL Editor.
+6. Click Run.
+7. Run the verification query above.
+
 ## 5. Deploy To Vercel
 
 1. Push code to GitHub.
@@ -108,6 +125,19 @@ JWT_SECRET=make-this-a-long-random-secret
 7. Click Deploy.
 
 After deploy, open the live URL and create an account.
+
+After changing any environment variable in Vercel, redeploy the project. Vercel applies new environment variables only to new deployments.
+
+Recommended Vercel values:
+
+```text
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/neondb?sslmode=verify-full
+JWT_SECRET=generate-a-long-random-secret
+```
+
+Do not prefix these with `NEXT_PUBLIC_`. They are server-only secrets.
+
+If Neon gives you a URL ending with `sslmode=require`, it is okay, but `sslmode=verify-full` avoids newer Node `pg` SSL warnings.
 
 ## 6. Deploy To Render Alternative
 
